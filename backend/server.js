@@ -4,6 +4,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDB } from './db.js';
 import { User, FoodPosting, ChatMessage, Notification } from './models.js';
+import twilio from 'twilio';
+import admin from 'firebase-admin';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -15,6 +18,74 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for base64 images
 
 // Connect to Database
 connectDB();
+
+// Initialize Firebase Admin
+try {
+  const serviceAccount = JSON.parse(fs.readFileSync('./planning-with-ai-46ca2-firebase-adminsdk-fbsvc-8b5c0f992d.json', 'utf8'));
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+} catch (error) {
+  console.log("Firebase Admin initialization failed. Ensure the JSON key file is present.");
+}
+
+// Initialize Twilio
+const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN 
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) 
+  : null;
+
+// --- TWILIO OTP ROUTES ---
+app.post('/api/auth/send-otp', async (req, res) => {
+  const { phone } = req.body;
+  if (!twilioClient || !process.env.TWILIO_VERIFY_SERVICE_SID) {
+      return res.status(500).json({ error: "Twilio credentials not configured on server" });
+  }
+  try {
+      const verification = await twilioClient.verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verifications.create({ to: phone, channel: 'sms' });
+      res.json({ success: true, status: verification.status });
+  } catch (e) {
+      res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  const { phone, code, isLoginPhase } = req.body;
+  if (!twilioClient || !process.env.TWILIO_VERIFY_SERVICE_SID) {
+      return res.status(500).json({ error: "Twilio credentials not configured on server" });
+  }
+  try {
+      const verificationCheck = await twilioClient.verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verificationChecks.create({ to: phone, code });
+
+      if (verificationCheck.status !== 'approved') {
+          return res.status(400).json({ error: 'Invalid OTP code' });
+      }
+
+      // If it's a login phrase, we need to issue a custom token for Firebase
+      if (isLoginPhase) {
+          // Find user by phone in MongoDB
+          const allUsers = await User.find();
+          const fPhone = phone.replace(/\D/g, '');
+          const appUser = allUsers.find(u => {
+              const uPhone = (u.contactNo || '').replace(/\D/g, '');
+              return uPhone && fPhone.includes(uPhone);
+          });
+
+          if (!appUser) {
+              return res.status(404).json({ error: 'Verification required. Please create an account to get verified.' });
+          }
+
+          // Mint Firebase Custom Token
+          const customToken = await admin.auth().createCustomToken(appUser.id);
+          return res.json({ success: true, customToken, user: appUser });
+      }
+
+      res.json({ success: true });
+  } catch (e) {
+      res.status(500).json({ error: e.message });
+  }
+});
 
 // --- USER ROUTES ---
 app.get('/api/users', async (req, res) => {

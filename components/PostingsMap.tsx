@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FoodPosting, FoodStatus } from '../types';
 import * as L from 'leaflet';
+import { getCurrentLocation } from '../services/mapLoader';
 
 interface PostingsMapProps {
   postings: FoodPosting[];
@@ -210,23 +211,16 @@ const PostingsMap: React.FC<PostingsMapProps> = ({ postings, onPostingSelect, us
       }
   }, [postings, userLocation]);
 
-  const handleLocateMe = () => {
+  const handleLocateMe = async () => {
       setLocating(true);
-      if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                  const { latitude, longitude } = pos.coords;
-                  if (mapInstanceRef.current) {
-                      mapInstanceRef.current.flyTo([latitude, longitude], 15);
-                  }
-                  setLocating(false);
-              },
-              () => {
-                  alert("Could not detect location.");
-                  setLocating(false);
-              }
-          );
-      } else {
+      try {
+          const pos = await getCurrentLocation();
+          if (mapInstanceRef.current) {
+              mapInstanceRef.current.flyTo([pos.lat, pos.lng], 15);
+          }
+      } catch (error: any) {
+          alert(error.message || "Could not detect location.");
+      } finally {
           setLocating(false);
       }
   };

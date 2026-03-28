@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, DonationType, FoodStatus, FoodPosting } from '../types';
 import { storage } from '../services/storageService';
 import { analyzeFoodSafetyImage, analyzeClothesImage, transcribeAudio } from '../services/geminiService';
-import { reverseGeocodeGoogle } from '../services/mapLoader';
+import { reverseGeocodeGoogle, getCurrentLocation } from '../services/mapLoader';
 import LocationPickerMap from './LocationPickerMap';
 import PaymentModal from './PaymentModal';
 import { getTranslation } from '../services/translations';
@@ -75,10 +75,12 @@ const AddDonationView: React.FC<AddDonationViewProps> = ({ user, initialType = '
         setLng(user.address.lng);
     } else {
         // Initial Geolocation if no address
-        navigator.geolocation.getCurrentPosition(pos => {
-            setLat(pos.coords.latitude);
-            setLng(pos.coords.longitude);
-        }, () => {});
+        getCurrentLocation()
+            .then(pos => {
+                setLat(pos.lat);
+                setLng(pos.lng);
+            })
+            .catch(() => {});
     }
   }, [user]);
 
@@ -245,38 +247,34 @@ const AddDonationView: React.FC<AddDonationViewProps> = ({ user, initialType = '
   };
 
   // --- Location Logic ---
-  const handleAutoDetectLocation = () => {
-    if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+  const handleAutoDetectLocation = async () => {
     setIsAutoDetecting(true);
     setIsAddressLoading(true); // Show loading skeleton on inputs
     
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        // Update Map View
-        setLat(latitude); 
-        setLng(longitude);
+    try {
+        const pos = await getCurrentLocation();
+        const { lat, lng } = pos;
         
-        try { 
-            // Attempt reverse geocoding to fill address fields
-            const a = await reverseGeocodeGoogle(latitude, longitude); 
-            if (a) { 
-                setLine1(a.line1); 
-                setLine2(a.line2); 
-                setLandmark(a.landmark || ''); 
-                setPincode(a.pincode); 
-            }
-            triggerHaptic('success');
-        } catch (error) {
-            console.error("Geocoding failed", error);
-        } finally { 
-            setIsAutoDetecting(false); 
-            setIsAddressLoading(false);
+        // Update Map View
+        setLat(lat); 
+        setLng(lng);
+        
+        // Attempt reverse geocoding to fill address fields
+        const a = await reverseGeocodeGoogle(lat, lng); 
+        if (a) { 
+            setLine1(a.line1); 
+            setLine2(a.line2); 
+            setLandmark(a.landmark || ''); 
+            setPincode(a.pincode); 
         }
-    }, () => { 
-        alert("Location access denied."); 
+        triggerHaptic('success');
+    } catch (error: any) {
+        alert(error.message || "Could not detect location.");
+        triggerHaptic('error');
+    } finally { 
         setIsAutoDetecting(false); 
         setIsAddressLoading(false);
-    }, { enableHighAccuracy: true });
+    }
   };
 
   // --- Submission Logic ---

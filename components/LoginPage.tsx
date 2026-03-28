@@ -3,19 +3,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole } from '../types';
 import { storage } from '../services/storageService';
 import { verifyVolunteerId, verifyRequesterDocument } from '../services/geminiService';
-import { reverseGeocodeGoogle } from '../services/mapLoader';
+import { reverseGeocodeGoogle, getCurrentLocation } from '../services/mapLoader';
 import ScrollReveal from './ScrollReveal';
 import { triggerHaptic } from '../services/haptics';
 import {
     auth,
     googleProvider,
     signInWithPopup,
-    RecaptchaVerifier,
-    signInWithPhoneNumber,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     signOut,
-    sendEmailVerification
+    sendEmailVerification,
+    signInWithCustomToken
 } from '../services/firebaseConfig';
 
 interface LoginPageProps {
@@ -64,14 +63,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
   const [phoneForAuth, setPhoneForAuth] = useState('');
   
   const [otp, setOtp] = useState('');
-  const [confirmationResult, setConfirmationResult] = useState<any>(null);
-  const recaptchaVerifierRef = useRef<any>(null);
 
   // --- REGISTRATION OTP STATE (Specifically for Donor Verification) ---
   const [regOtp, setRegOtp] = useState('');
   const [isRegOtpSent, setIsRegOtpSent] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-  const [regConfirmationResult, setRegConfirmationResult] = useState<any>(null);
 
   // --- REGISTER STATE ---
   const [regName, setRegName] = useState('');
@@ -109,16 +105,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Clean up recaptcha on unmount
-    return () => {
-        if (recaptchaVerifierRef.current) {
-            try {
-                recaptchaVerifierRef.current.clear();
-            } catch (e) {
-                // Ignore clear error
-            }
-        }
-    };
+    // Auth mounted
   }, []);
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -146,7 +133,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
           setRegOtp('');
           setIsRegOtpSent(false);
           setIsPhoneVerified(false);
-          setRegConfirmationResult(null);
       }
       if (newView === 'PHONE_LOGIN') setPhoneForAuth('');
       if (newView === 'PHONE_OTP') setOtp('');
@@ -201,22 +187,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
       const formattedPhone = phoneForAuth.startsWith('+') ? phoneForAuth : `+91${phoneForAuth}`;
 
       try {
-          if (!recaptchaVerifierRef.current) {
-              recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                  'size': 'invisible',
-                  'callback': () => {}
-              });
-          }
-          const confirmation = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifierRef.current);
-          setConfirmationResult(confirmation);
+          const res = await fetch('/api/auth/send-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: formattedPhone })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to send OTP");
+          
           triggerHaptic('success');
           switchView('PHONE_OTP');
       } catch (err: any) {
           console.error(err);
           setError(err.message || "Failed to send OTP");
           triggerHaptic('error');
-          if (recaptchaVerifierRef.current) recaptchaVerifierRef.current.clear();
-          recaptchaVerifierRef.current = null;
       } finally {
           setLoading(false);
       }
@@ -226,34 +210,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
       e.preventDefault();
       setError(''); setLoading(true);
       
+      const formattedPhone = phoneForAuth.startsWith('+') ? phoneForAuth : `+91${phoneForAuth}`;
       try {
-          const result = await confirmationResult.confirm(otp);
-          const user = result.user;
-          let appUser = await storage.getUser(user.uid);
-
-          if (!appUser) {
-               const allUsers = await storage.getUsers();
-               const fPhone = (user.phoneNumber || '').replace(/\D/g, '');
-               appUser = allUsers.find(u => {
-                   const uPhone = (u.contactNo || '').replace(/\D/g, '');
-                   return uPhone && fPhone.includes(uPhone);
-               });
-
-               if (!appUser) {
+          const res = await fetch('/api/auth/verify-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: formattedPhone, code: otp, isLoginPhase: true })
+          });
+          const data = await res.json();
+          
+          if (!res.ok) {
+              if (res.status === 404) {
                    setError("Verification required. Please create an account to get verified.");
                    triggerHaptic('error');
                    setLoading(false);
-                   
                    await signOut(auth);
-                   setRegPhone((user.phoneNumber || phoneForAuth).replace('+91', ''));
+                   setRegPhone(phoneForAuth.replace('+91', ''));
                    switchView('REGISTER');
                    return;
-               }
+              }
+              throw new Error(data.error || "Invalid OTP");
+          }
+
+          // Mint custom token and sign into Firebase locally
+          if (data.customToken) {
+              await signInWithCustomToken(auth, data.customToken);
           }
           triggerHaptic('success');
-          onLogin(appUser);
+          onLogin(data.user);
       } catch (err: any) {
-          setError("Invalid OTP");
+          setError(err.message || "Invalid OTP");
           triggerHaptic('error');
           setLoading(false);
       }
@@ -271,36 +257,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
       const formattedPhone = regPhone.startsWith('+') ? regPhone : `+91${regPhone}`;
       
       try {
-          if (!recaptchaVerifierRef.current) {
-              recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                  'size': 'invisible',
-                  'callback': () => {}
-              });
-          }
-          const confirmation = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifierRef.current);
-          setRegConfirmationResult(confirmation);
+          const res = await fetch('/api/auth/send-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: formattedPhone })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to send OTP");
+          
           setIsRegOtpSent(true);
           triggerHaptic('success');
       } catch (err: any) {
           console.error(err);
           setError(err.message || "Failed to send OTP. Try again.");
           triggerHaptic('error');
-          if (recaptchaVerifierRef.current) recaptchaVerifierRef.current.clear();
-          recaptchaVerifierRef.current = null;
       }
   };
 
   const handleVerifyRegOtp = async () => {
       if (!regOtp || regOtp.length < 6) return;
+      const formattedPhone = regPhone.startsWith('+') ? regPhone : `+91${regPhone}`;
       try {
-          await regConfirmationResult.confirm(regOtp);
+          const res = await fetch('/api/auth/verify-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: formattedPhone, code: regOtp, isLoginPhase: false })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Invalid OTP");
+          
           setIsPhoneVerified(true);
           setIsRegOtpSent(false);
           triggerHaptic('success');
-          // Important: Signing out because confirm() signs the user in, but we want to Create a new user with Email/Pass next.
-          await signOut(auth);
-      } catch (err) {
-          setError("Invalid OTP");
+      } catch (err: any) {
+          setError(err.message || "Invalid OTP");
           triggerHaptic('error');
       }
   };
@@ -341,34 +331,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onShowStory }) =>
 
   // --- SECURE REGISTRATION LOGIC ---
 
-  const handleAutoDetectLocation = () => {
-    if (!navigator.geolocation) {
-        alert("Geolocation is not supported by your browser.");
-        return;
-    }
+  const handleAutoDetectLocation = async () => {
     setDetectingLoc(true);
     triggerHaptic('impactLight');
-    navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude } = position.coords;
-        setLatLng({ lat: latitude, lng: longitude });
+    
+    try {
+        const pos = await getCurrentLocation();
+        const { lat, lng } = pos;
+        
+        setLatLng({ lat, lng });
         triggerHaptic('success');
         
-        try {
-            const address = await reverseGeocodeGoogle(latitude, longitude);
-            if (address) {
-                setLine1(address.line1);
-                setLine2(address.line2);
-                setPincode(address.pincode);
-            }
-        } catch (error) {
-            console.error("Geocoding failed", error);
-        } finally {
-            setDetectingLoc(false);
+        const address = await reverseGeocodeGoogle(lat, lng);
+        if (address) {
+            setLine1(address.line1);
+            setLine2(address.line2);
+            setPincode(address.pincode);
         }
-    }, () => {
+    } catch (error: any) {
+        alert(error.message || "Could not detect location.");
+        triggerHaptic('error');
+    } finally {
         setDetectingLoc(false);
-        alert("Unable to retrieve your location.");
-    });
+    }
   };
 
   const handleIdUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

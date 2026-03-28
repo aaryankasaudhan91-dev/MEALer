@@ -14,7 +14,8 @@ import {
     updateProfile as firebaseUpdateProfile,
     PhoneAuthProvider as FirebasePhoneAuthProvider,
     signInWithCredential as firebaseSignInWithCredential,
-    sendEmailVerification as firebaseSendEmailVerification
+    sendEmailVerification as firebaseSendEmailVerification,
+    signInWithCustomToken as firebaseSignInWithCustomToken
 } from "firebase/auth";
 
 import { getStorage } from "firebase/storage";
@@ -177,6 +178,16 @@ const sendEmailVerification = async (user: any) => {
     return;
 };
 
+const signInWithCustomToken = async (authArg: any, customToken: string) => {
+    if (isConfigured) return firebaseSignInWithCustomToken(authArg, customToken);
+    
+    await new Promise(r => setTimeout(r, 800));
+    console.log(`[Simulation] Signed in with custom token`);
+    const user = { ...mockUser, uid: 'sim-phone-user' };
+    updateMockAuthState(user);
+    return { user };
+};
+
 const onAuthStateChanged = (authArg: any, callback: any) => {
     if (isConfigured) return firebaseOnAuthStateChanged(authArg, callback);
     // In simulation mode, do not auto-login to mock user on refresh to allow Login Page testing
@@ -217,5 +228,6 @@ export {
     updateProfile,
     PhoneAuthProvider,
     signInWithCredential,
-    sendEmailVerification
+    sendEmailVerification,
+    signInWithCustomToken
 };

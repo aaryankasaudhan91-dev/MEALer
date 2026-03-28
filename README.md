@@ -35,18 +35,26 @@ A streamlined platform connecting food donors, volunteers, and orphanages to eli
     FIREBASE_STORAGE_BUCKET=your_project.appspot.com
     FIREBASE_MESSAGING_SENDER_ID=your_sender_id
     FIREBASE_APP_ID=your_app_id
+    MONGODB_URI=mongodb+srv://<db_username>:<db_password>@<cluster_name>.mongodb.net/?appName
     ```
 
     > **Simulation Mode:** If you do not provide Firebase keys (or leave them as placeholders), the app will automatically run in **Simulation Mode**. OTPs will be mocked and displayed in an in-app notification for testing purposes.
 
-3.  **Run the Application**
+3.  **Run the Server**
+
+    Start the local server:
+    ```bash
+    npm run server 
+    ```
+
+4.  **Run the Application**
 
     Start the local development server:
     ```bash
     npm run dev
     ```
 
-4.  **Open in Browser**
+5.  **Open in Browser**
 
     Navigate to the URL displayed in your terminal (usually `http://localhost:5173`).
 

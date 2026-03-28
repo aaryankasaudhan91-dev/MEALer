@@ -24,6 +24,7 @@ import { optimizeMultiStopRoute, MultiStopRouteResult } from './services/geminiS
 import { auth, onAuthStateChanged, signOut } from './services/firebaseConfig';
 import { getTranslation } from './services/translations';
 import { triggerHaptic } from './services/haptics';
+import { getCurrentLocation } from './services/mapLoader';
 
 const QUOTES = [
     "No one has ever become poor by giving.",
@@ -195,10 +196,9 @@ const App: React.FC = () => {
             { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
         );
     } else {
-        navigator.geolocation.getCurrentPosition(
-            (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            (err) => console.log("Location access denied", err)
-        );
+        getCurrentLocation()
+            .then((pos) => setUserLocation({ lat: pos.lat, lng: pos.lng }))
+            .catch((err) => console.log("Location access denied/failed", err));
     }
     return () => {
         clearInterval(interval);
