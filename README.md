@@ -36,6 +36,9 @@ A streamlined platform connecting food donors, volunteers, and orphanages to eli
     FIREBASE_MESSAGING_SENDER_ID=your_sender_id
     FIREBASE_APP_ID=your_app_id
     MONGODB_URI=mongodb+srv://<db_username>:<db_password>@<cluster_name>.mongodb.net/?appName
+    TWILIO_ACCOUNT_SID=twilio_account_sid
+    TWILIO_AUTH_TOKEN=twilio_auth_token
+    TWILIO_VERIFY_SERVICE_SID=twilio_verify_service_sid
     ```
 
     > **Simulation Mode:** If you do not provide Firebase keys (or leave them as placeholders), the app will automatically run in **Simulation Mode**. OTPs will be mocked and displayed in an in-app notification for testing purposes.
